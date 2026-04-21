@@ -1,5 +1,6 @@
 package br.com.forum_hub.domain.autenticacao.github;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -9,8 +10,8 @@ import java.util.Map;
 @Service
 public class LoginGithubService {
 
-    private final String clientId = "Ov23liOYXMzHiT3gI6lG";
-    private final String clientSecret = "1561fc026f1adc90f981bd5e0f226a379060577c";
+    private final String clientId = "placeholder";
+    private final String clientSecret = "placeholder";
     private final String redirectUri = "http://localhost:8080/login/github/autorizado";
     private final RestClient restClient;
 
@@ -23,19 +24,66 @@ public class LoginGithubService {
         return "https://github.com/login/oauth/authorize"+
                 "?client_id="+clientId +
                 "&redirect_uri="+redirectUri +
-                "&scope=read:user,user:email";
+                "&scope=read:user,user:email,public_repo";
     }
 
 
-    public String obterToken(String code) {
+    private String obterToken(String code) {
         var resposta = restClient.post()
                 .uri("https://github.com/login/oauth/access_token")
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.APPLICATION_JSON)
-                .body(Map.of("code", code, "client_id", clientId,
-                        "client_secret", clientSecret, "redirect_uri", redirectUri))
+                .body(Map.of(
+                        "code", code,
+                        "client_id", clientId,
+                        "client_secret", clientSecret,
+                        "redirect_uri", redirectUri
+                ))
+                .retrieve()
+                .body(Map.class);
+
+        if (resposta == null || resposta.get("access_token") == null) {
+            throw new RuntimeException("GitHub não retornou access_token. Resposta: " + resposta);
+        }
+
+        return resposta.get("access_token").toString();
+    }
+
+    public String obterEmail(String code) {
+        var token = obterToken(code);
+
+        var headers = new HttpHeaders();
+        headers.setBearerAuth(token);
+
+        var resposta = restClient.get()
+                .uri("https://api.github.com/user/emails")
+                .headers(httpHeaders -> httpHeaders.addAll(headers))
+                .accept(MediaType.APPLICATION_JSON)
+                .retrieve()
+                .body(DadosEmail[].class);
+
+        var repositorios = restClient.get()
+                .uri("https://api.github.com/user/repos")
+                .headers(httpHeaders -> httpHeaders.addAll(headers))
+                .accept(MediaType.APPLICATION_JSON)
                 .retrieve()
                 .body(String.class);
-        return resposta;
+                 System.out.println(repositorios);
+
+
+
+        if (resposta == null) {
+            throw new RuntimeException("GitHub não retornou emails do usuário.");
+        }
+
+        for (DadosEmail d : resposta) {
+            if (d.primary() && d.verified()) {
+                return d.email();
+            }
+        }
+
+        return null;
     }
+
+
 }
